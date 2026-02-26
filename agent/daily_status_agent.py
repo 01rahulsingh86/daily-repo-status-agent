@@ -1,46 +1,73 @@
 import os
-from github import Github
 from datetime import datetime, timedelta
-import openai
 
+from github import Github
+from github import Auth
+from openai import OpenAI
+
+# --------------------
 # ENV VARS
+# --------------------
 GITHUB_TOKEN = os.getenv("GITHUB_TOKEN")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 REPO_NAME = os.getenv("GITHUB_REPOSITORY")
 
-openai.api_key = OPENAI_API_KEY
+if not all([GITHUB_TOKEN, OPENAI_API_KEY, REPO_NAME]):
+    raise RuntimeError("Missing required environment variables")
 
-g = Github(GITHUB_TOKEN)
-repo = g.get_repo(REPO_NAME)
+# --------------------
+# GitHub Client (new auth)
+# --------------------
+auth = Auth.Token(GITHUB_TOKEN)
+gh = Github(auth=auth)
+repo = gh.get_repo(REPO_NAME)
 
+# --------------------
+# Time window
+# --------------------
 since = datetime.utcnow() - timedelta(days=1)
 
 issues = repo.get_issues(state="all", since=since)
-prs = repo.get_pulls(state="all")
+prs = repo.get_pulls(state="open")
 commits = repo.get_commits(since=since)
 
-summary_input = f"""
-Repo: {REPO_NAME}
+# --------------------
+# LLM Client (new OpenAI API)
+# --------------------
+client = OpenAI(api_key=OPENAI_API_KEY)
 
-Issues (last 24h): {issues.totalCount}
-PRs (open): {prs.totalCount}
-Commits (last 24h): {commits.totalCount}
+prompt = f"""
+Repository: {REPO_NAME}
 
-Write a concise daily repo status for maintainers.
-Include risks, progress, and next actions.
+Activity in the last 24 hours:
+- Issues updated/created: {issues.totalCount}
+- Open pull requests: {prs.totalCount}
+- Commits pushed: {commits.totalCount}
+
+Write a concise daily repository status report for maintainers.
+Include:
+- Current health
+- Risks or blockers
+- Progress highlights
+- Recommended next actions
 """
 
-response = openai.ChatCompletion.create(
+response = client.chat.completions.create(
     model="gpt-4o-mini",
-    messages=[{"role": "user", "content": summary_input}]
+    messages=[
+        {"role": "user", "content": prompt}
+    ]
 )
 
 report = response.choices[0].message.content
 
+# --------------------
+# Create GitHub Issue
+# --------------------
 repo.create_issue(
     title=f"Daily Repo Status – {datetime.utcnow().strftime('%Y-%m-%d')}",
     body=report,
     labels=["daily-status"]
 )
 
-print("Daily status issue created")
+print(" Daily repo status issue created successfully")
