@@ -13,7 +13,11 @@ alerts = []
 
 for wf in workflows:
     runs = wf.get_runs(status="completed")
-    for run in runs[:5]:
+    runs_list = list(runs)  # <-- convert to normal list
+    if not runs_list:
+        continue  # skip empty workflows
+
+    for run in runs_list[:5]:  # take latest 5
         if run.conclusion != "success":
             alerts.append(f"Workflow {wf.name} failed at {run.created_at}")
 
